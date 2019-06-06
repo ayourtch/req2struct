@@ -70,6 +70,10 @@
 #[macro_use]
 extern crate serde_derive;
 
+#[macro_use]
+extern crate log;
+extern crate env_logger;
+
 use serde::de::{
     self,
     value::{MapDeserializer, SeqDeserializer},
@@ -285,7 +289,7 @@ impl<'de> de::Deserializer<'de> for Val {
     where
         V: serde::de::Visitor<'de>,
     {
-        println!("DESER newtype");
+        debug!("DESER newtype");
         visitor.visit_newtype_struct(self)
     }
 
@@ -303,7 +307,7 @@ impl<'de> de::Deserializer<'de> for VarName {
     where
         V: de::Visitor<'de>,
     {
-        println!("DESER ANY {:#?}", &self.0);
+        debug!("DESER ANY {:#?}", &self.0);
         self.0.into_deserializer().deserialize_any(visitor)
     }
 
@@ -312,7 +316,7 @@ impl<'de> de::Deserializer<'de> for VarName {
     where
         V: serde::de::Visitor<'de>,
     {
-        println!("DESER VISIT struct");
+        debug!("DESER VISIT struct");
         visitor.visit_newtype_struct(self)
     }
 
@@ -331,7 +335,7 @@ struct Deserializer<'de, Iter: Iterator<Item = (String, FormFieldValue)>> {
 
 impl<'de, Iter: Iterator<Item = (String, FormFieldValue)>> Deserializer<'de, Iter> {
     fn new(vars: Iter) -> Self {
-        println!("DESER new");
+        debug!("DESER new");
         Deserializer {
             inner: MapDeserializer::new(Vars(vars)),
         }
@@ -346,7 +350,7 @@ impl<'de, Iter: Iterator<Item = (String, FormFieldValue)>> de::Deserializer<'de>
     where
         V: de::Visitor<'de>,
     {
-        println!("DESER Deserialize any!");
+        debug!("DESER Deserialize any!");
         self.deserialize_map(visitor)
     }
 
@@ -354,7 +358,7 @@ impl<'de, Iter: Iterator<Item = (String, FormFieldValue)>> de::Deserializer<'de>
     where
         V: de::Visitor<'de>,
     {
-        println!("DESER Deserialize map!");
+        debug!("DESER Deserialize map!");
         visitor.visit_map(self.inner)
     }
 
@@ -418,7 +422,7 @@ impl<'de> de::Deserializer<'de> for FormFieldValue {
     where
         V: de::Visitor<'de>,
     {
-        println!("DESER FORMFIELD {:#?}", &self);
+        debug!("DESER FORMFIELD {:#?}", &self);
         match self {
             FormFieldValue::Scalar(s) => s.into_deserializer().deserialize_any(visitor),
             FormFieldValue::Vector(v) => v.into_deserializer().deserialize_any(visitor),
@@ -443,7 +447,7 @@ impl<'de> de::Deserializer<'de> for FormFieldValue {
     where
         V: de::Visitor<'de>,
     {
-        println!("Deserialize BOOL FORMFIELD {:#?}", &self);
+        debug!("Deserialize BOOL FORMFIELD {:#?}", &self);
         let mut val = false;
         if let FormFieldValue::Scalar(s)  = self {
             if s== "on" {
@@ -458,7 +462,7 @@ impl<'de> de::Deserializer<'de> for FormFieldValue {
     where
         V: serde::de::Visitor<'de>,
     {
-        println!("DESER VISIT struct");
+        debug!("DESER VISIT struct");
         visitor.visit_newtype_struct(self)
     }
 
@@ -487,7 +491,7 @@ pub fn from_map<T>(m: &HashMap<String, Vec<String>>) -> Result<T>
 where
     T: de::DeserializeOwned,
 {
-    println!("DESER from map");
+    debug!("DESER from map");
     let mut m1: HashMap<String, FormFieldValue> = m
         .clone()
         .iter()
@@ -512,8 +516,8 @@ where
             )
         })
         .collect();
-    println!("m1: {:#?}", &m1);
-    println!("m3: {:#?}", &m3);
+    debug!("m1: {:#?}", &m1);
+    debug!("m3: {:#?}", &m3);
     let mut m2: HashMap<String, HashMap<usize, HashMap<String, FormFieldValue>>> = HashMap::new();
     for (k, v) in m3 {
         let kk: Vec<&str> = k.split("__").collect();
@@ -530,13 +534,13 @@ where
         .map(|(k, v)| (k.to_owned(), FormFieldValue::Vector(map2vec(v))))
         .collect();
 
-    println!("m2: {:#?}", &m2);
-    println!("m4: {:#?}", &m4);
+    debug!("m2: {:#?}", &m2);
+    debug!("m4: {:#?}", &m4);
 
     m1.extend(m4);
 
     from_iter(m1.iter().map(|(k, v)| {
-        println!("MAP {} - {:#?}", &k, &v);
+        debug!("MAP {} - {:#?}", &k, &v);
         (k.to_string(), v.clone())
     }))
 }
@@ -548,7 +552,7 @@ where
     T: de::DeserializeOwned,
     Iter: IntoIterator<Item = (String, FormFieldValue)>,
 {
-    println!("DESER from iter");
+    debug!("DESER from iter");
     T::deserialize(Deserializer::new(iter.into_iter()))
 }
 
@@ -563,7 +567,7 @@ impl<'a> Prefixed<'a> {
     where
         T: de::DeserializeOwned,
     {
-        println!("DESER from map2");
+        debug!("DESER from map2");
         self.from_iter(m.iter().map(|(k, v)| (k.to_string(), v.clone())))
     }
 
@@ -573,7 +577,7 @@ impl<'a> Prefixed<'a> {
         T: de::DeserializeOwned,
         Iter: IntoIterator<Item = (String, FormFieldValue)>,
     {
-        println!("DESER from iter2");
+        debug!("DESER from iter2");
         crate::from_iter(iter.into_iter().filter_map(|(k, v)| {
             if k.starts_with(self.0.as_ref()) {
                 Some((k.trim_start_matches(self.0.as_ref()).to_owned(), v))
