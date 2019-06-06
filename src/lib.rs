@@ -260,6 +260,9 @@ impl<'de> de::Deserializer<'de> for Val {
             if sclr == "on" {
                 val = true;
             }
+            if sclr == "true" {
+                val = true;
+            }
         }
         val.into_deserializer().deserialize_bool(visitor)
     }
