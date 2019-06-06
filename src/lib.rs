@@ -86,9 +86,9 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 struct Vars<Iter>(Iter)
 where
-    Iter: IntoIterator<Item = (String, String)>;
+    Iter: IntoIterator<Item = (String, FormFieldValue)>;
 
-struct Val(String, String);
+struct Val(String, FormFieldValue);
 
 impl<'de> IntoDeserializer<'de, Error> for Val {
     type Deserializer = Self;
@@ -108,11 +108,28 @@ impl<'de> IntoDeserializer<'de, Error> for VarName {
     }
 }
 
-impl<Iter: Iterator<Item = (String, String)>> Iterator for Vars<Iter> {
+impl<Iter: Iterator<Item = (String, FormFieldValue)>> Iterator for Vars<Iter> {
     type Item = (VarName, Val);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.0.next().map(|(k, v)| (VarName(k.clone()), Val(k, v)))
+        println!("DESER NEXT");
+        let the_next = self.0.next();
+        println!("NEXT: {:#?}", &the_next);
+        let ret = the_next.map(|(k, v)| {
+            println!("k: {}", &k);
+            /*
+            let kv: Vec<&str> = k.split("__").collect();
+            let kk = if kv.len() == 3 {
+                kv[0].to_string().clone()
+            } else {
+                k.clone()
+            };
+            */
+            let kk = k.clone();
+            (VarName(kk.clone()), Val(kk, v))
+        });
+        ret
+        // self.0.next().map(|(k, v)| (VarName(k.clone()), Val(k, v)))
     }
 }
 
@@ -122,9 +139,42 @@ macro_rules! forward_parsed_values {
             fn $method<V>(self, visitor: V) -> Result<V::Value>
                 where V: de::Visitor<'de>
             {
-                match self.1.parse::<$ty>() {
-                    Ok(val) => val.into_deserializer().$method(visitor),
-                    Err(e) => Err(de::Error::custom(format_args!("{} while parsing value '{}' provided by {}", e, self.1, self.0)))
+                println!("PPParsing: {:#?} {:#?}", &self.0, &self.1);
+                match &self.1 {
+                    FormFieldValue::Scalar(sclr) => {
+                        // FIXME: later figure out how to deal with multiple values
+                        match sclr.parse::<$ty>() {
+                            Ok(val) => val.into_deserializer().$method(visitor),
+                            Err(e) => Err(de::Error::custom(format_args!("{} while parsing value '{:#?}' provided by {}", e, self.1, self.0)))
+                        }
+                    },
+                    FormFieldValue::Vector(vectr) => {
+                        Err(de::Error::custom(format_args!("Vector seen rather than scalar while parsing value '{:#?}' provided by {}", self.1, self.0)))
+                    }
+                }
+            }
+        )*
+    }
+}
+
+macro_rules! forward_parsed_values_scalar {
+    ($($ty:ident => $method:ident,)*) => {
+        $(
+            fn $method<V>(self, visitor: V) -> Result<V::Value>
+                where V: de::Visitor<'de>
+            {
+                println!("SCALAR PPParsing: {:#?}", &self);
+                match &self {
+                    FormFieldValue::Scalar(sclr) => {
+                        // FIXME: later figure out how to deal with multiple values
+                        match sclr.parse::<$ty>() {
+                            Ok(val) => val.into_deserializer().$method(visitor),
+                            Err(e) => Err(de::Error::custom(format_args!("{} while parsing value {:#?}", e, &self)))
+                        }
+                    },
+                    FormFieldValue::Vector(vectr) => {
+                        Err(de::Error::custom(format_args!("Vector seen rather than scalar while parsing value {:#?}", &self)))
+                    }
                 }
             }
         )*
@@ -137,15 +187,60 @@ impl<'de> de::Deserializer<'de> for Val {
     where
         V: de::Visitor<'de>,
     {
-        self.1.into_deserializer().deserialize_any(visitor)
+        match self.1 {
+            FormFieldValue::Scalar(sclr) => sclr.into_deserializer().deserialize_any(visitor),
+            FormFieldValue::Vector(vectr) => {
+                // FIXME
+                // SeqDeserializer::new(vectr.into_iter()).deserialize_any(visitor) // .map(|m| from_iter(m.into_iter().deserialize_map(visitor))))
+                Err(de::Error::custom(format_args!("ZZZZ unimpltemented!")))
+            }
+        }
+    }
+
+    // fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value>
+    fn deserialize_map<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        // let values = self.1.split(',').map(|v| Val(self.0.clone(), v.to_owned()));
+        // Err(de::Error::custom(format_args!("deserialize_seq unimpltemented!")))
+        match self.1 {
+            FormFieldValue::Scalar(s) => Err(de::Error::custom(format_args!(
+                "Scalar in vector context: {} ",
+                &self.0
+            ))),
+            FormFieldValue::Vector(vectr) => {
+                MapDeserializer::new(Vars(vectr[0].clone().into_iter())).deserialize_map(visitor)
+
+                // Err(de::Error::custom(format_args!( "deserialize_seq unimpltemented!")))
+                // SeqDeserializer::new(vectr.into_iter().map(|x| x.into_iter()).deserialize_map(visitor)).deserialize_seq(visitor)
+            }
+        }
     }
 
     fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value>
     where
         V: de::Visitor<'de>,
     {
-        let values = self.1.split(',').map(|v| Val(self.0.clone(), v.to_owned()));
-        SeqDeserializer::new(values).deserialize_seq(visitor)
+        // Err(de::Error::custom(format_args!("deserialize_seq unimpltemented!")))
+        match self.1 {
+            FormFieldValue::Scalar(s) => Err(de::Error::custom(format_args!(
+                "Scalar in vector context: {} ",
+                &self.0
+            ))),
+            FormFieldValue::Vector(vectr) => {
+                //let k: Vec<(String, String)> = vec![("Test1".to_string(), "Test2".to_string())];
+                // SeqDeserializer::new(vectr.iter()).deserialize_seq(visitor)
+                // SeqDeserializer::new(vectr.iter()).deserialize_seq(visitor)
+                vectr.into_deserializer().deserialize_seq(visitor)
+                // MapDeserializer::new(Vars(vectr[0].clone().into_iter())).deserialize_map(visitor)
+
+                // SeqDeserializer::new(vectr.iter()).deserialize_seq(visitor)
+
+                // Err(de::Error::custom(format_args!( "deserialize_seq unimpltemented!")))
+                // SeqDeserializer::new(vectr.into_iter().map(|x| x.into_iter()).deserialize_map(visitor)).deserialize_seq(visitor)
+            }
+        }
     }
 
     fn deserialize_option<V>(self, visitor: V) -> Result<V::Value>
@@ -159,10 +254,12 @@ impl<'de> de::Deserializer<'de> for Val {
     where
         V: de::Visitor<'de>,
     {
-        println!("Deserialize {}", &self.1);
+        println!("Deserialize {:#?}", &self.1);
         let mut val = false;
-        if self.1 == "on" {
-            val = true;
+        if let FormFieldValue::Scalar(sclr) = self.1 {
+            if sclr == "on" {
+                val = true;
+            }
         }
         val.into_deserializer().deserialize_bool(visitor)
     }
@@ -185,12 +282,13 @@ impl<'de> de::Deserializer<'de> for Val {
     where
         V: serde::de::Visitor<'de>,
     {
+        println!("DESER newtype");
         visitor.visit_newtype_struct(self)
     }
 
     serde::forward_to_deserialize_any! {
         char str string unit
-        bytes byte_buf map unit_struct tuple_struct
+        bytes byte_buf unit_struct tuple_struct
         identifier tuple ignored_any enum
         struct
     }
@@ -202,6 +300,7 @@ impl<'de> de::Deserializer<'de> for VarName {
     where
         V: de::Visitor<'de>,
     {
+        println!("DESER ANY {:#?}", &self.0);
         self.0.into_deserializer().deserialize_any(visitor)
     }
 
@@ -210,6 +309,7 @@ impl<'de> de::Deserializer<'de> for VarName {
     where
         V: serde::de::Visitor<'de>,
     {
+        println!("DESER VISIT struct");
         visitor.visit_newtype_struct(self)
     }
 
@@ -222,19 +322,20 @@ impl<'de> de::Deserializer<'de> for VarName {
 }
 
 /// A deserializer for env vars
-struct Deserializer<'de, Iter: Iterator<Item = (String, String)>> {
+struct Deserializer<'de, Iter: Iterator<Item = (String, FormFieldValue)>> {
     inner: MapDeserializer<'de, Vars<Iter>, Error>,
 }
 
-impl<'de, Iter: Iterator<Item = (String, String)>> Deserializer<'de, Iter> {
+impl<'de, Iter: Iterator<Item = (String, FormFieldValue)>> Deserializer<'de, Iter> {
     fn new(vars: Iter) -> Self {
+        println!("DESER new");
         Deserializer {
             inner: MapDeserializer::new(Vars(vars)),
         }
     }
 }
 
-impl<'de, Iter: Iterator<Item = (String, String)>> de::Deserializer<'de>
+impl<'de, Iter: Iterator<Item = (String, FormFieldValue)>> de::Deserializer<'de>
     for Deserializer<'de, Iter>
 {
     type Error = Error;
@@ -242,6 +343,7 @@ impl<'de, Iter: Iterator<Item = (String, String)>> de::Deserializer<'de>
     where
         V: de::Visitor<'de>,
     {
+        println!("DESER Deserialize any!");
         self.deserialize_map(visitor)
     }
 
@@ -249,6 +351,7 @@ impl<'de, Iter: Iterator<Item = (String, String)>> de::Deserializer<'de>
     where
         V: de::Visitor<'de>,
     {
+        println!("DESER Deserialize map!");
         visitor.visit_map(self.inner)
     }
 
@@ -260,12 +363,179 @@ impl<'de, Iter: Iterator<Item = (String, String)>> de::Deserializer<'de>
     }
 }
 
+/*
+
+impl<'de, Iter: Iterator<Item = (HashMap<String, FormFieldValue>)>> de::Deserializer<'de>
+    for Deserializer<'de, Iter>
+{
+    type Error = Error;
+    fn deserialize_any<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        println!("DESER Deserialize any!");
+        self.deserialize_seq(visitor)
+    }
+
+    fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        println!("DESER Deserialize map!");
+        visitor.visit_seq(self.inner)
+    }
+
+    serde::forward_to_deserialize_any! {
+        bool u8 u16 u32 u64 i8 i16 i32 i64 f32 f64 char str string unit map
+        bytes byte_buf unit_struct tuple_struct
+        identifier tuple ignored_any option newtype_struct enum
+        struct
+    }
+}
+
+*/
+
+#[derive(Debug, Clone, Deserialize)]
+pub enum FormFieldValue {
+    Scalar(String),
+    Vector(Vec<HashMap<String, FormFieldValue>>),
+}
+
+impl<'de> IntoDeserializer<'de, Error> for FormFieldValue {
+    type Deserializer = Self;
+
+    fn into_deserializer(self) -> Self::Deserializer {
+        self
+    }
+}
+
+impl<'de> de::Deserializer<'de> for FormFieldValue {
+    type Error = Error;
+    fn deserialize_any<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        println!("DESER FORMFIELD {:#?}", &self);
+        match self {
+            FormFieldValue::Scalar(s) => s.into_deserializer().deserialize_any(visitor),
+            FormFieldValue::Vector(v) => v.into_deserializer().deserialize_any(visitor),
+        }
+    }
+
+    forward_parsed_values_scalar! {
+        u8 => deserialize_u8,
+        u16 => deserialize_u16,
+        u32 => deserialize_u32,
+        u64 => deserialize_u64,
+        i8 => deserialize_i8,
+        i16 => deserialize_i16,
+        i32 => deserialize_i32,
+        i64 => deserialize_i64,
+        f32 => deserialize_f32,
+        f64 => deserialize_f64,
+    }
+
+
+    fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: de::Visitor<'de>,
+    {
+        println!("Deserialize BOOL FORMFIELD {:#?}", &self);
+        let mut val = false;
+        if let FormFieldValue::Scalar(s)  = self {
+            if s== "on" {
+                val = true;
+            }
+        }
+        val.into_deserializer().deserialize_bool(visitor)
+    }
+
+    #[inline]
+    fn deserialize_newtype_struct<V>(self, _: &'static str, visitor: V) -> Result<V::Value>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        println!("DESER VISIT struct");
+        visitor.visit_newtype_struct(self)
+    }
+
+    serde::forward_to_deserialize_any! {
+        char str string unit seq option
+        bytes byte_buf map unit_struct tuple_struct
+        identifier tuple ignored_any enum
+        struct // u8 u16 u32 u64 i8 i16 i32 i64 f32 f64
+    }
+}
+
+fn map2vec(
+    m: &HashMap<usize, HashMap<String, FormFieldValue>>,
+) -> Vec<HashMap<String, FormFieldValue>> {
+    let len = m.keys().len();
+    let mut vo: Vec<HashMap<String, FormFieldValue>> = vec![];
+    for i in 0..len {
+        vo.push(m[&i].clone());
+    }
+
+    vo
+}
+
 /// Deserializes a type based on information stored in env variables
 pub fn from_map<T>(m: &HashMap<String, Vec<String>>) -> Result<T>
 where
     T: de::DeserializeOwned,
 {
-    from_iter(m.iter().map(|(k, v)| (k.to_string(), v[0].clone())))
+    println!("DESER from map");
+    let mut m1: HashMap<String, FormFieldValue> = m
+        .clone()
+        .iter()
+        .filter(|(k, v)| {
+            let vv: Vec<&str> = k.split("__").collect();
+            vv.len() == 1
+        })
+        .map(|(k, v)| (k.to_owned(), FormFieldValue::Scalar(v[0].to_owned())))
+        .collect();
+    let mut m3: HashMap<String, FormFieldValue> = m
+        .clone()
+        .iter()
+        .filter(|(k, v)| {
+            let vv: Vec<&str> = k.split("__").collect();
+            vv.len() == 3
+        })
+        .map(|(k, v)| {
+            (
+                k.clone(),
+                // FormFieldValue::Scalar(format!("k = {}, v = {:?}", &k, &v)),
+                FormFieldValue::Scalar(format!("{}", &v[0])),
+            )
+        })
+        .collect();
+    println!("m1: {:#?}", &m1);
+    println!("m3: {:#?}", &m3);
+    let mut m2: HashMap<String, HashMap<usize, HashMap<String, FormFieldValue>>> = HashMap::new();
+    for (k, v) in m3 {
+        let kk: Vec<&str> = k.split("__").collect();
+        m2.entry(kk[0].to_string())
+            .or_insert(HashMap::new())
+            .entry(kk[1].to_string().parse::<usize>().unwrap_or(0))
+            .or_insert(HashMap::new())
+            .entry(kk[2].to_string())
+            .or_insert(v);
+    }
+
+    let m4: HashMap<String, FormFieldValue> = m2
+        .iter()
+        .map(|(k, v)| (k.to_owned(), FormFieldValue::Vector(map2vec(v))))
+        .collect();
+
+    println!("m2: {:#?}", &m2);
+    println!("m4: {:#?}", &m4);
+
+    m1.extend(m4);
+
+    from_iter(m1.iter().map(|(k, v)| {
+        println!("MAP {} - {:#?}", &k, &v);
+        (k.to_string(), v.clone())
+    }))
 }
 
 /// Deserializes a type based on an iterable of `(String, String)`
@@ -273,8 +543,9 @@ where
 pub fn from_iter<Iter, T>(iter: Iter) -> Result<T>
 where
     T: de::DeserializeOwned,
-    Iter: IntoIterator<Item = (String, String)>,
+    Iter: IntoIterator<Item = (String, FormFieldValue)>,
 {
+    println!("DESER from iter");
     T::deserialize(Deserializer::new(iter.into_iter()))
 }
 
@@ -285,19 +556,21 @@ pub struct Prefixed<'a>(Cow<'a, str>);
 
 impl<'a> Prefixed<'a> {
     /// Deserializes a type based on prefixed env varables
-    pub fn from_map<T>(&self, m: &HashMap<String, Vec<String>>) -> Result<T>
+    pub fn from_map<T>(&self, m: &HashMap<String, FormFieldValue>) -> Result<T>
     where
         T: de::DeserializeOwned,
     {
-        self.from_iter(m.iter().map(|(k, v)| (k.to_string(), v[0].clone())))
+        println!("DESER from map2");
+        self.from_iter(m.iter().map(|(k, v)| (k.to_string(), v.clone())))
     }
 
     /// Deserializes a type based on prefixed (String, String) tuples
     pub fn from_iter<Iter, T>(&self, iter: Iter) -> Result<T>
     where
         T: de::DeserializeOwned,
-        Iter: IntoIterator<Item = (String, String)>,
+        Iter: IntoIterator<Item = (String, FormFieldValue)>,
     {
+        println!("DESER from iter2");
         crate::from_iter(iter.into_iter().filter_map(|(k, v)| {
             if k.starts_with(self.0.as_ref()) {
                 Some((k.trim_start_matches(self.0.as_ref()).to_owned(), v))
