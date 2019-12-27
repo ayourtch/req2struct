@@ -116,11 +116,11 @@ impl<Iter: Iterator<Item = (String, FormFieldValue)>> Iterator for Vars<Iter> {
     type Item = (VarName, Val);
 
     fn next(&mut self) -> Option<Self::Item> {
-        println!("DESER NEXT");
+        debug!("DESER NEXT");
         let the_next = self.0.next();
-        println!("NEXT: {:#?}", &the_next);
+        debug!("NEXT: {:#?}", &the_next);
         let ret = the_next.map(|(k, v)| {
-            println!("k: {}", &k);
+            debug!("k: {}", &k);
             /*
             let kv: Vec<&str> = k.split("__").collect();
             let kk = if kv.len() == 3 {
@@ -143,7 +143,7 @@ macro_rules! forward_parsed_values {
             fn $method<V>(self, visitor: V) -> Result<V::Value>
                 where V: de::Visitor<'de>
             {
-                println!("PPParsing: {:#?} {:#?}", &self.0, &self.1);
+                debug!("PPParsing: {:#?} {:#?}", &self.0, &self.1);
                 match &self.1 {
                     FormFieldValue::Scalar(sclr) => {
                         // FIXME: later figure out how to deal with multiple values
@@ -167,7 +167,7 @@ macro_rules! forward_parsed_values_scalar {
             fn $method<V>(self, visitor: V) -> Result<V::Value>
                 where V: de::Visitor<'de>
             {
-                println!("SCALAR PPParsing: {:#?}", &self);
+                debug!("SCALAR PPParsing: {:#?}", &self);
                 match &self {
                     FormFieldValue::Scalar(sclr) => {
                         // FIXME: later figure out how to deal with multiple values
@@ -258,7 +258,7 @@ impl<'de> de::Deserializer<'de> for Val {
     where
         V: de::Visitor<'de>,
     {
-        println!("Deserialize {:#?}", &self.1);
+        debug!("Deserialize {:#?}", &self.1);
         let mut val = false;
         if let FormFieldValue::Scalar(sclr) = self.1 {
             if sclr == "on" {
